@@ -1,0 +1,43 @@
+# 数据文件（含敏感业务数据，不上传）
+*.xlsx
+*.csv
+
+# 训练/调试脚本
+train_*.py
+optimize_*.py
+debug_*.py
+test_*.py
+label_*.py
+clean_desc.py
+prepare_training_data.py
+classify_samples.py
+import_to_db.py
+schema.sql
+classify_full_data.py
+classify_remaining_data.py
+
+# 内部资产（品牌词库、设计文档）
+brand.json
+*.md
+!README.md
+
+# 训练样本（含业务数据，不上传）
+training_samples*.json
+
+# 旧版本模型（只保留 fasttext_10k_* 三个生产模型）
+fasttext_*.bin
+!models/fasttext_10k_type.bin
+!models/fasttext_10k_physical.bin
+!models/fasttext_10k_scene.bin
+
+# MLX / BERT 实验产物
+models/mlx_classifier/
+models/bert-base-chinese/
+
+# 数据库
+pgdata/
+
+# 其他
+__pycache__/
+.DS_Store
+*.pyc
