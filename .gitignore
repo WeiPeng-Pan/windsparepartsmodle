@@ -54,3 +54,4 @@ pgdata/
 __pycache__/
 .DS_Store
 *.pyc
+compare_on_corrected_test.py

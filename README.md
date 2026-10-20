@@ -17,13 +17,15 @@
 
 | 维度 | 纯模型(val) | 混合方案(test) | macro-F1 |
 |:-----|:-----------:|:------------:|:--------:|
-| type | 92.2% | **92.0%** | 76.5 |
-| physical | 80.6% | **81.0%** | 81.0 |
-| scene | 80.9% | **81.7%** | 79.9 |
+| type | 93.5% | **91.7%** | 75.7 |
+| physical | 84.7% | **80.9%** | 80.9 |
+| scene | 82.4% | **81.8%** | 80.1 |
 
-三维全对率 **62.3%**。推理速度约 **8 万条/秒**（Apple M 系列 CPU）。
+三维全对率 **62.0%**。推理速度约 **8 万条/秒**（Apple M 系列 CPU）。
 
-> 弱项（样本少/标签歧义）：type 大部件 recall 33%（test 仅 21 条）、scene 变流系统类 55%、润滑系统类 68%。
+> 标签质量说明：训练/验证集经 flash 模型复核修正 88 处高置信标签错误（flash 与模型一致
+> 共同推翻原标注，见 data/label_fixes.json）；test 标签未修正以保持指标可比。
+> 弱项（样本少/标签歧义）：type 大部件 recall 33%（test 仅 21 条）、scene 变流系统类 52%、润滑系统类 70%。
 
 ## 安装
 
@@ -65,6 +67,8 @@ for name in names:
 │   ├── fasttext_v2_physical.bin   # physical 分类模型
 │   └── fasttext_v2_scene.bin      # scene 分类模型
 ├── data_pipeline.py           # 数据清洗 + 固定三切分（近重复同折）
+├── apply_label_fixes.py       # 高置信标签修正重放（flash+模型双确认）
+├── relabel_weak.py            # 弱类可疑样本 flash 重打标
 ├── retrain_clean.py           # 干净重训 + test 报告
 ├── finalize_v2.py             # 子词模型最终配方（生产模型由它产出）
 ├── example.py                 # 使用示例
