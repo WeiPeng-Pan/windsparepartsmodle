@@ -3,7 +3,7 @@
 配方(val选优结果):
   type/physical: lr=0.05 epoch=60 wordNgrams=3 dim=32 bucket=200000 minn=2 maxn=4
   scene:         lr=0.1  epoch=50 wordNgrams=2 dim=16 bucket=100000 minn=2 maxn=4
-训练数据: data/train_v4.json (v3 + 权威大部件口径重打标206条, 见 relabel_major.py/apply_major_relabel.py)
+训练数据: data/train_v5.json (v4 + 同义词/能级规则提升45条, 见 synonym_promotions.json)
 """
 import json, os, re, tempfile
 from collections import Counter
@@ -22,7 +22,7 @@ def load(name):
     with open(os.path.join(BASE, 'data', f'{name}.json')) as f:
         return json.load(f)
 
-train, val, test = load('train_v4'), load('val'), load('test')
+train, val, test = load('train_v5'), load('val'), load('test')
 
 def write_ft(data, path, dim):
     lines = [f"__label__{re.sub(r'\s+', '_', d[dim].strip())} {d['name']}" for d in data]
