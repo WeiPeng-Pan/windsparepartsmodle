@@ -40,13 +40,12 @@ TYPE_RULES = [
 # ============ 大部件同义词与能级规则(业务确认口径) ============
 # 同义词: 叶片回转轴承=变桨轴承; 大齿圈=回转轴承; 桨叶=叶片;
 #         高原配/及高原/超高原/速比/型号等只是整机规格限定词,不改变本体
-# 能级规则: 名称含整机词时,若同时含配件词(螺栓/密封/泵/传感器等)则按配件归类;
-#           但回转轴承类(变桨/偏航/回转轴承、大齿圈)的连接螺栓套件不降级,仍按大部件管理
+# 能级规则: 名称含整机词时,若同时含配件词(螺栓/密封/泵/传感器等)则按配件归类
+# 口径确认(2026-10-20): 轴承连接螺栓套件(含垫片螺母)一律按备件,不算大部件
 BEARING_TERMS = re.compile(r"变桨轴承|偏航轴承|回转轴承|大齿圈")
 BEARING_ACCESSORY = re.compile(
     r"润滑|加脂|油脂|密封|传感|编码|变送|监测|监视|视频|注油|废油|费油|油嘴|分配|"
-    r"收集|集油|袋|垫片|垫圈|螺杆|裂纹|孔")
-BOLT_SET = re.compile(r"螺栓|螺柱")
+    r"收集|集油|袋|垫片|垫圈|螺杆|螺栓|螺柱|螺母|螺钉|裂纹|孔|模块")
 QUALIFIER_RE = re.compile(r"不含\S*|含\S*")
 MAJOR_TERMS = re.compile(
     r"机舱罩壳|机舱前盖板|主轴总成|主轴轴承|主轴承|主轴组件|主轴轴系|风轮叶片|"
@@ -78,9 +77,8 @@ def _major_component_match(name):
     能级实现: 回转轴承类本体优先,其连接螺栓套件(含垫片螺母)不降级;
     其他整机词命中后,把整机词从名称中剥离,若剩余部分含配件词则降级。
     """
-    if BEARING_TERMS.search(name):
-        if not BEARING_ACCESSORY.search(name) or BOLT_SET.search(name):
-            return '大部件'  # 回转轴承类本体及其连接螺栓套件
+    if BEARING_TERMS.search(name) and not BEARING_ACCESSORY.search(name):
+        return '大部件'  # 回转轴承类本体(螺栓套件等配件除外)
     if MAJOR_TERMS.search(name):
         # 先剥"含X/不含X"限定词(再做整机词剥离,避免"含叶片监测"被拆断漏出裸词)
         residue = QUALIFIER_RE.sub(' ', name)
