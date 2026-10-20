@@ -13,19 +13,20 @@
 ## 模型效果
 
 基于约 **1 万条 LLM 辅助标注样本**训练（固定三切分 train/val/test = 7967/996/996，
-近重复合并且同折、13 组标签冲突人工裁定，test 集从未参与训练与调参）：
+近重复合并且同折、13 组标签冲突人工裁定，test 集从未参与训练与调参；
+train 另并入 1280 条 flash 定向补样——大部件/变流/润滑弱类，见 augment_data.py）：
 
 | 维度 | 纯模型(val) | 混合方案(test) | macro-F1 |
 |:-----|:-----------:|:------------:|:--------:|
-| type | 93.5% | **91.7%** | 75.7 |
-| physical | 84.7% | **80.9%** | 80.9 |
-| scene | 82.4% | **81.8%** | 80.1 |
+| type | 93.7% | **91.9%** | 78.7 |
+| physical | 83.2% | **81.5%** | 81.3 |
+| scene | 82.4% | **82.0%** | 81.0 |
 
-三维全对率 **62.0%**。推理速度约 **8 万条/秒**（Apple M 系列 CPU）。
+三维全对率 **63.2%**。推理速度约 **8 万条/秒**（Apple M 系列 CPU）。
 
-> 标签质量说明：训练/验证集经 flash 模型复核修正 88 处高置信标签错误（flash 与模型一致
-> 共同推翻原标注，见 data/label_fixes.json）；test 标签未修正以保持指标可比。
-> 弱项（样本少/标签歧义）：type 大部件 recall 33%（test 仅 21 条）、scene 变流系统类 52%、润滑系统类 70%。
+> 标签质量说明：训练/验证集经 flash 模型复核修正 88 处高置信标签错误（见
+> data/label_fixes.json）；test 标签未修正以保持指标可比。
+> 弱项（样本稀少/标签歧义）：type 大部件 recall 48%（test 仅 21 条）、scene 变流系统类 61%。
 
 ## 安装
 
@@ -68,11 +69,12 @@ for name in names:
 │   └── fasttext_v2_scene.bin      # scene 分类模型
 ├── data_pipeline.py           # 数据清洗 + 固定三切分（近重复同折）
 ├── apply_label_fixes.py       # 高置信标签修正重放（flash+模型双确认）
+├── augment_data.py            # 弱类定向补样（业务清单抽候选 + flash 打标）
 ├── relabel_weak.py            # 弱类可疑样本 flash 重打标
 ├── retrain_clean.py           # 干净重训 + test 报告
 ├── finalize_v2.py             # 子词模型最终配方（生产模型由它产出）
 ├── example.py                 # 使用示例
-└── data/                      # train/val/test 固定切分（业务数据,不入库）
+└── data/                      # 固定切分与增强集（业务数据,不入库）
 ```
 
 ## 技术说明
