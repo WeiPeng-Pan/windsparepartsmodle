@@ -16,6 +16,11 @@ schema.sql
 classify_full_data.py
 classify_remaining_data.py
 
+# 一次性评估/实验脚本
+eval_effect.py
+sim_rules.py
+exp_char_token.py
+
 # 内部资产（品牌词库、设计文档）
 brand.json
 *.md
@@ -24,11 +29,19 @@ brand.json
 # 训练样本（含业务数据，不上传）
 training_samples*.json
 
-# 旧版本模型（只保留 fasttext_10k_* 三个生产模型）
+# 固定三切分（业务数据派生，由 data_pipeline.py 可复现）
+data/
+
+# 评估产物（含业务物料名）
+eval_report.txt
+eval_report_final.txt
+eval_results.json
+
+# 旧版本模型（只保留 fasttext_v2_* 三个生产模型）
 fasttext_*.bin
-!models/fasttext_10k_type.bin
-!models/fasttext_10k_physical.bin
-!models/fasttext_10k_scene.bin
+!models/fasttext_v2_type.bin
+!models/fasttext_v2_physical.bin
+!models/fasttext_v2_scene.bin
 
 # MLX / BERT 实验产物
 models/mlx_classifier/

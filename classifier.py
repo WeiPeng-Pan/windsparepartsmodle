@@ -4,6 +4,10 @@
 
 规则优先（高置信度关键词 → 直接出结果）
 模型兜底（规则覆盖不了的用 fastText）
+
+v2.1: 配套子词 fastText 模型(fasttext_v2_*,minn/maxn=2/4)
+- 规则库按「规则 vs 模型在各自触发集上的准确率」裁剪,只保留规则不劣于模型的高置信组
+- 油品判定用专用谓词: 以"油"结尾 或 含润滑脂/黄油等成品油词
 """
 
 import fasttext
@@ -13,41 +17,37 @@ import re
 # ============ 规则库 ============
 
 # scene 规则（关键词 → 场景）
-# 优先级从高到低
+# v2.1: 子词模型变强后按 val 集逐组对比裁剪——只保留规则≥模型的高置信组
 SCENE_RULES = [
     (["偏航"], "偏航系统类"),
     (["变桨"], "变桨系统类"),
-    (["齿轮箱", "齿轮箱类", "齿轮箱系统"], "齿轮箱类"),
-    (["发电机", "发电机类", "发电机系统"], "发电机类"),
-    (["液压", "液压系统", "液压站"], "液压系统类"),
-    (["润滑", "润滑油", "润滑脂", "润滑系统"], "润滑系统类"),
-    (["控制", "控制器", "控制柜", "控制模块", "PLC", "控制系统"], "控制系统类"),
-    (["变流", "变流器", "变频器"], "变流系统类"),
+    (["齿轮箱"], "齿轮箱类"),
+    (["发电机"], "发电机类"),
+    (["PLC"], "控制系统类"),
 ]
 
 # type 规则（仅用于高置信度明确关键词）
-# 注意：不含"发电机""齿轮箱"等易误伤的大部件关键词
-# 数据表明含这些词的物料 78%+ 是备件/耗材而非大部件
+# v2.1: 删"碳刷"(精度31%)和"滤芯"(模型100% vs 规则90%)
 TYPE_RULES = [
     # 耗材 - 明确消耗品
-    (["滤芯", "滤棉", "滤网", "O型圈", "油封", "碳刷", "扎带", "擦机布", "擦拭纸"], "耗材"),
+    (["滤棉", "滤网", "O型圈", "油封", "扎带", "擦机布", "擦拭纸"], "耗材"),
     # 工器具 - 明确工具
     (["扳手", "螺丝刀", "万用表", "电钻", "角磨机", "钳子", "吊带", "千斤顶", "手锤", "撬棍", "测试仪", "示波器", "兆欧表", "液压扳手", "扭力扳手", "吊环"], "工器具"),
-    # 大部件规则已移除——含"塔筒""发电机""齿轮箱"的物料 90%+是备件/耗材
-    # (如"塔筒灯""发电机集电环""齿轮箱滤芯")，规则匹配误伤率太高
-    # 大部件分类完全交给 fastText 模型处理
 ]
 
-# physical 规则（可选增强）
+# physical 规则（v2.1: 子词模型在原各规则组触发集上达 85%+,全面超过规则,
+# 仅保留与模型打平且确定性高的「传感器」组;油品走专用谓词）
 PHYSICAL_RULES = [
-    (["油", "润滑脂", "润滑油", "液压油", "齿轮油"], "油品"),
-    (["密封圈", "O型圈", "油封", "密封垫", "密封条", "密封件"], "密封件"),
-    (["传感器", "探头", "变送器", "编码器", "接近开关", "压力开关"], "传感器"),
-    (["PLC", "CPU", "模块", "芯片", "电路板", "PCB", "电源模块", "通讯模块"], "电子件"),
-    (["液压", "液压阀", "液压泵", "液压缸", "油缸", "液压站", "液压件"], "液压件"),
-    (["电机", "断路器", "接触器", "继电器", "变压器", "变频器", "开关", "熔断器", "电缆", "电线"], "电气件"),
-    (["轴承", "螺栓", "螺母", "垫圈", "弹簧", "销", "轴", "齿轮", "链条", "联轴器", "法兰", "管接头", "支架", "壳体", "罩", "盖板", "法兰"], "机械件"),
+    (["传感器", "接近开关", "压力开关"], "传感器"),
 ]
+
+# 油品判定：以"油"结尾（齿轮油/液压油/润滑油/变压器油等成品油）或含成品油脂词
+# v2: 裸"油"子串误伤653条非油品物料（油管/油泵/注油接头等），已废弃
+OIL_PRODUCTS = ["润滑脂", "黄油", "锂基脂", "废油"]
+
+
+def _is_oil_product(name):
+    return name.rstrip().endswith("油") or any(kw in name for kw in OIL_PRODUCTS)
 
 
 class WindClassifier:
@@ -65,9 +65,9 @@ class WindClassifier:
         self.model_physical = None
         self.model_scene = None
 
-        type_path = os.path.join(model_dir, 'fasttext_10k_type.bin')
-        physical_path = os.path.join(model_dir, 'fasttext_10k_physical.bin')
-        scene_path = os.path.join(model_dir, 'fasttext_10k_scene.bin')
+        type_path = os.path.join(model_dir, 'fasttext_v2_type.bin')
+        physical_path = os.path.join(model_dir, 'fasttext_v2_physical.bin')
+        scene_path = os.path.join(model_dir, 'fasttext_v2_scene.bin')
 
         if os.path.exists(type_path):
             self.model_type = fasttext.load_model(type_path)
@@ -77,12 +77,16 @@ class WindClassifier:
             self.model_scene = fasttext.load_model(scene_path)
 
     def _rule_match(self, name, rules):
-        """关键词匹配，返回第一个命中的标签"""
+        """关键词匹配，返回第一个命中的标签；条目可含第3个元素(正则列表)"""
         if not name:
             return None
-        for keywords, label in rules:
+        for entry in rules:
+            keywords, label = entry[0], entry[1]
             for kw in keywords:
                 if kw in name:
+                    return label
+            for rx in (entry[2] if len(entry) > 2 else []):
+                if rx.search(name):
                     return label
         return None
 
@@ -108,7 +112,10 @@ class WindClassifier:
             methods['type'] = 'default'
 
         # ---- physical ----
-        physical_rule = self._rule_match(name, PHYSICAL_RULES)
+        if _is_oil_product(name):
+            physical_rule = '油品'
+        else:
+            physical_rule = self._rule_match(name, PHYSICAL_RULES)
         if physical_rule:
             result['physical'] = physical_rule
             methods['physical'] = 'rule'
