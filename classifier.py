@@ -99,6 +99,35 @@ PHYSICAL_RULES = [
     (["碳刷", "电刷"], "电气件"),  # 业务裁定2026-10-20: 碳刷/电刷及其配件属电气件
 ]
 
+# ============ 油品牌号 → scene (牌号用途经 websearch 确认, 2026-10-20) ============
+# 仅对油品语境的名称生效; 型号可辨识系统者按系统归类(业务裁定)
+# 依据: Omala=壳牌工业/风电齿轮油; OPTIGEAR/UNISYN=福斯合成齿轮油; EMGARD=BASF齿轮油;
+#       Klüberplex BEM(PLEX)/STABYL=风电主轴/发电机轴承脂; RHODINA BBZ=壳牌叶片轴承脂;
+#       GADUS=壳牌通用脂; GLEITMO=福斯变桨/偏航脂; CEPLATTYN=福斯开式齿轮脂;
+#       DYNAGEAR=美孚得耐格偏航/变桨开式齿轮脂; MOLYKOTE=多功能脂
+OIL_BRAND_RULES = [
+    (["OMALA", "OPTIGEAR", "UNISYN", "EMGARD"], "齿轮箱类"),
+    (["RHODINA", "BBZ", "GADUS", "STABYL", "GLEITMO", "MOLYKOTE",
+      "CEPLATTYN", "DYNAGEAR", "PLEX", "BEM"], "润滑系统类"),
+]
+OILISH_RE = re.compile(r'润滑|油脂|黄油|锂基脂|GREASE|GEAR OIL', re.IGNORECASE)
+
+
+def _oil_brand_scene(name):
+    """油品牌号识别: 返回 scene 或 None; SHC 细分(XMP/GEAR=齿轮油, GREASE/脂=润滑脂)"""
+    n = name.upper()
+    if 'SHC' in n:
+        if 'XMP' in n or 'GEAR' in n:
+            return '齿轮箱类'
+        if 'GREASE' in n or '脂' in name or '油' in name:
+            return '润滑系统类'
+        return None  # 裸SHC语境不明, 交模型
+    for kws, scene in OIL_BRAND_RULES:
+        if any(re.search(rf'\b{kw}\b', n) for kw in kws):
+            return scene
+    return None
+
+
 # 油品判定：以"油"结尾（齿轮油/液压油/润滑油/变压器油等成品油）或含成品油脂词
 # v2: 裸"油"子串误伤653条非油品物料（油管/油泵/注油接头等），已废弃
 OIL_PRODUCTS = ["润滑脂", "黄油", "锂基脂", "废油"]
@@ -220,6 +249,8 @@ class WindClassifier:
 
         # ---- scene ----
         scene_rule = self._rule_match(_canon(name), SCENE_RULES)
+        if not scene_rule:
+            scene_rule = _oil_brand_scene(name)  # 油品牌号识别(型号定系统)
         if not scene_rule and _is_oil_product(name) and re.search(r'主轴|主轴承', name):
             scene_rule = '润滑系统类'  # 业务裁定2026-10-20: 主轴润滑油脂属润滑系统(如主轴轴承润滑油)
         if scene_rule:
