@@ -65,7 +65,8 @@ MAJOR_ACCESSORY = re.compile(
     r"组件|铜|销|导向|栓|记录|卡|表|游标|指示|温度|液位|管道|管路|管|软管|罩|壳|"
     r"端盖|锻件|透气|帽|天窗|标签|柜|机箱|箱|盒|手操|手柄|挡板|绝缘|防雷器|防雷箱|"
     r"转子防雷|浪涌|主控|整流|加热器|呼吸|干燥|储能|罐|蓄能|分配器|CMS|测速|驱动|"
-    r"离心盘|收缩盘|盘|电池|充电|交换机|门锁|锁|减震|地脚|按钮|空开|安装|"
+    r"离心盘|收缩盘|盘|电池|充电|交换机|门锁|锁|减震|地脚|按钮|空开|安装|标识|标志|"
+    r"扶手|拉手|滑轨|雨眉|顶盖|盖|梯|除湿|雷达|插头|拉伸|胀套|警告|测风|存储|"
     r"运输|费|部装|电源|不间断|电容|电阻|电抗|互感|二极管|母排|预充|单元|通讯|第|"
     r"适配|程序|Crowbar|crowbar|备品|清洗|弹力|内窥|限制|调整|锁紧|逃生包|"
     r"圈|上置|下置|空冷|接地|防尘|桶|PLC|逆变|监控|水冷|免爬|子站|从站|变频|软件|内存|备件|工控|电脑|"
@@ -73,19 +74,22 @@ MAJOR_ACCESSORY = re.compile(
 
 
 def _major_component_match(name):
-    """整机词+同义词+能级判定: 返回'大部件'或None(交给后续规则/模型)
+    """整机词+同义词+能级判定: 返回 '大部件' / 'demoted'(配件,排除大部件) / None(交给模型)
 
-    能级实现: 回转轴承类本体优先,其连接螺栓套件(含垫片螺母)不降级;
-    其他整机词命中后,把整机词从名称中剥离,若剩余部分含配件词则降级。
+    能级实现: 回转轴承类本体优先;其他整机词命中后,把整机词从名称中剥离,
+    若剩余部分含配件词则降级——降级时模型仍可判备件/耗材/工器具,但不得判大部件。
     """
-    if BEARING_TERMS.search(name) and not BEARING_ACCESSORY.search(name):
-        return '大部件'  # 回转轴承类本体(螺栓套件等配件除外)
+    if BEARING_TERMS.search(name):
+        if not BEARING_ACCESSORY.search(name):
+            return '大部件'  # 回转轴承类本体(螺栓套件等配件除外)
+        return 'demoted'
     if MAJOR_TERMS.search(name):
         # 先剥"含X/不含X"限定词(再做整机词剥离,避免"含叶片监测"被拆断漏出裸词)
         residue = QUALIFIER_RE.sub(' ', name)
         residue = MAJOR_TERMS.sub(' ', residue)
         if not MAJOR_ACCESSORY.search(residue):
             return '大部件'
+        return 'demoted'
     return None
 
 # physical 规则（v2.1: 子词模型在原各规则组触发集上达 85%+,全面超过规则,
@@ -152,13 +156,21 @@ class WindClassifier:
         methods = {}
 
         # ---- type ----
-        type_rule = _major_component_match(name) or self._rule_match(name, TYPE_RULES)
+        major = _major_component_match(name)
+        type_rule = ('大部件' if major == '大部件' else None) or self._rule_match(name, TYPE_RULES)
         if type_rule:
             result['type'] = type_rule
             methods['type'] = 'rule'
         elif self.model_type:
             pred = self.model_type.predict(name)
-            result['type'] = pred[0][0].replace('__label__', '')
+            label = pred[0][0].replace('__label__', '')
+            if label == '大部件' and major == 'demoted':
+                # 能级降级: 配件不得判大部件,取剩余标签中概率最高者
+                labels, probs = self.model_type.predict(name, k=-1)
+                alt = max(((l, p) for l, p in zip(labels, probs)
+                           if l != '__label__大部件'), key=lambda x: x[1])
+                label = alt[0].replace('__label__', '')
+            result['type'] = label
             methods['type'] = 'model'
         else:
             result['type'] = '备件'
