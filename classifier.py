@@ -45,7 +45,7 @@ TYPE_RULES = [
 BEARING_TERMS = re.compile(r"变桨轴承|偏航轴承|回转轴承|大齿圈")
 BEARING_ACCESSORY = re.compile(
     r"润滑|加脂|油脂|密封|传感|编码|变送|监测|监视|视频|注油|废油|费油|油嘴|分配|"
-    r"收集|集油|袋|垫片|垫圈|螺杆|螺栓|螺柱|螺母|螺钉|裂纹|孔|模块")
+    r"收集|集油|袋|垫片|垫圈|螺杆|螺栓|螺柱|螺母|螺钉|裂纹|孔|模块|吊")
 QUALIFIER_RE = re.compile(r"不含\S*|含\S*")
 MAJOR_TERMS = re.compile(
     r"机舱罩壳|机舱前盖板|主轴总成|主轴轴承|主轴承|主轴组件|主轴轴系|风轮叶片|"
