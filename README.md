@@ -14,6 +14,8 @@
 > 主轴承（主轴轴承）、变桨轴承（叶片回转轴承）、偏航轴承、塔筒、机舱罩/机舱壳/机舱前盖板、导流罩、
 > 轮毂、主机架、变流器整机、**主机（整套组合销售场景）**；变桨减速机、液压站总成、变压器等总成级部件属备件；上述整机的配件
 > （螺栓/碳刷/密封圈等）按备件/耗材归类。
+> **同义词归一**（SYNONYMS 表，全局预处理）：叶片回转轴承→变桨轴承、大齿圈→回转轴承、桨叶→叶片，
+> 规则层匹配前统一归一（模型输入保持原始名避免分布偏移），新同义词直接追加 SYNONYMS 表。
 > **同义词与能级**（classifier.py 内置规则）：大齿圈=回转轴承；"高原配/速比/型号"等是整机规格限定词
 > 不改变本体；名称含多个部件词时按能级判定——整机词+配件词并存则按配件归类；
 > **轴承连接螺栓套件（含垫片螺母）一律按备件，不算大部件**。
@@ -75,18 +77,44 @@ for name in names:
 ```
 ├── classifier.py              # 分类器（规则 + fastText 混合）
 ├── models/
-│   ├── fasttext_v2_type.bin       # type 分类模型
-│   ├── fasttext_v2_physical.bin   # physical 分类模型
-│   └── fasttext_v2_scene.bin      # scene 分类模型
+│   ├── fasttext_v6_type.bin       # type 分类模型
+│   ├── fasttext_v6_physical.bin   # physical 分类模型
+│   └── fasttext_v6_scene.bin      # scene 分类模型
+├── classifier.py              # 分类器（同义词归一 + 规则 + fastText + 置信度分层）
+├── models/
+│   ├── fasttext_v6_type.bin / _physical.bin / _scene.bin   # 生产模型
+│   └── VERSION                # 模型版本说明
+├── gen_review_queue.py        # 复核队列生成器（置信度分层的落地入口）
+├── make_audit_sample.py       # test 人工抽检抽样（分层 + flash 预填可选）
+├── apply_audit.py             # 抽检结果消费（噪声率统计 + 纠错记录）
+├── retrain_with_feedback.py   # 反馈闭环一键重训（corrections.json → 新版模型）
 ├── data_pipeline.py           # 数据清洗 + 固定三切分（近重复同折）
-├── apply_label_fixes.py       # 高置信标签修正重放（flash+模型双确认）
 ├── augment_data.py            # 弱类定向补样（业务清单抽候选 + flash 打标）
-├── relabel_weak.py            # 弱类可疑样本 flash 重打标
-├── retrain_clean.py           # 干净重训 + test 报告
-├── finalize_v2.py             # 子词模型最终配方（生产模型由它产出）
 ├── example.py                 # 使用示例
-└── data/                      # 固定切分与增强集（业务数据,不入库）
+└── data/                      # 固定切分/增强集/纠错记录（业务数据,不入库）
 ```
+
+## 日常运维工作流（置信度分层 + 反馈闭环）
+
+```python
+from classifier import WindClassifier
+clf = WindClassifier()
+r = clf.classify("偏航刹车片 SK8010")
+# r['tier']: 每维 auto(概率≥0.9,自动采信) / low(0.7~0.9) / review(<0.7,需人工)
+# r['prob']: 每维模型概率
+```
+
+1. **批量分类**: `python3 gen_review_queue.py <清单.xlsx> [名称列]`
+   → 生成 `*_已分类.xlsx`（含概率/置信列）+ `*_复核队列.xlsx`（review 行 + top3 建议）
+2. **人工复核**: 在复核队列的 `人工_*` 列填正确标签（参考建议列，一致可不填）
+3. **test 抽检**(定期): `python3 make_audit_sample.py`（可加 FLASH_API_KEY 预填 flash 建议）
+   → 人工填 `data/audit_sample.xlsx` → `python3 apply_audit.py` 得噪声率 + 纠错入 corrections.json
+4. **一键重训**: `python3 retrain_with_feedback.py`
+   → 纠错并入训练集，产出下一版本模型 + 新旧 test 对比报告
+
+> scene 两阶段实验结论（2026-10-20, val 验证）：弱类 recall 小幅提升（润滑 +6pp/控制 +3pp）
+> 但通用类 recall 87%→82% 拖累整体（acc -1.6pp, macro-F1 -0.8），净收益为负，**不采纳**。
+> scene 弱类的正确路径是反馈闭环积累纠错样本后重训。
 
 ## 技术说明
 

@@ -37,7 +37,7 @@ for dim in DIMS:
     m = fasttext.train_supervised(input=tp, loss='softmax', minCount=1, thread=4, verbose=0, **RECIPES[dim])
     p = m.test(vp)[1]
     models[dim] = m
-    out = os.path.join(BASE, 'models', f'fasttext_v2_{dim}.bin')
+    out = os.path.join(BASE, 'models', f'fasttext_v6_{dim}.bin')
     m.save_model(out)
     print(f'{dim}: val P={p:.1%} → {out} ({os.path.getsize(out)//1024}KB)')
     os.unlink(tp); os.unlink(vp)

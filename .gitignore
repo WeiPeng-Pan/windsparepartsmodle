@@ -39,9 +39,9 @@ eval_results.json
 
 # 旧版本模型（只保留 fasttext_v2_* 三个生产模型）
 fasttext_*.bin
-!models/fasttext_v2_type.bin
-!models/fasttext_v2_physical.bin
-!models/fasttext_v2_scene.bin
+!models/fasttext_v6_type.bin
+!models/fasttext_v6_physical.bin
+!models/fasttext_v6_scene.bin
 
 # MLX / BERT 实验产物
 models/mlx_classifier/
@@ -55,3 +55,4 @@ __pycache__/
 .DS_Store
 *.pyc
 compare_on_corrected_test.py
+exp_two_stage_scene.py

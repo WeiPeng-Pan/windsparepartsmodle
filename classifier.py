@@ -5,7 +5,7 @@
 规则优先（高置信度关键词 → 直接出结果）
 模型兜底（规则覆盖不了的用 fastText）
 
-v2.1: 配套子词 fastText 模型(fasttext_v2_*,minn/maxn=2/4)
+v2.1: 配套子词 fastText 模型(fasttext_v6_*,minn/maxn=2/4)
 - 规则库按「规则 vs 模型在各自触发集上的准确率」裁剪,只保留规则不劣于模型的高置信组
 - 油品判定用专用谓词: 以"油"结尾 或 含润滑脂/黄油等成品油词
 """
@@ -102,6 +102,23 @@ PHYSICAL_RULES = [
 # v2: 裸"油"子串误伤653条非油品物料（油管/油泵/注油接头等），已废弃
 OIL_PRODUCTS = ["润滑脂", "黄油", "锂基脂", "废油"]
 
+# ============ 同义词归一(全局预处理, 业务确认口径) ============
+# 仅作用于规则层匹配(scene/physical/type规则); 模型输入保持原始名称,
+# 避免与训练数据产生分布偏移。新同义词直接往表里追加。
+SYNONYMS = [
+    (r"叶片回转轴承", "变桨轴承"),   # 叶片回转轴承=变桨轴承
+    (r"大齿圈", "回转轴承"),         # 大齿圈=回转轴承
+    (r"回转轴承", "变桨轴承"),       # 回转轴承默认归变桨(偏航大齿圈等含系统词的不受影响)
+    (r"桨叶", "叶片"),              # 桨叶=叶片
+]
+_SYN_RE = re.compile("|".join(p for p, _ in SYNONYMS))
+_SYN_MAP = dict(SYNONYMS)
+
+
+def _canon(name):
+    """同义词归一: 返回规则层用标准名(原始名不动)"""
+    return _SYN_RE.sub(lambda m: _SYN_MAP[m.group(0)], name)
+
 
 def _is_oil_product(name):
     return name.rstrip().endswith("油") or any(kw in name for kw in OIL_PRODUCTS)
@@ -122,9 +139,9 @@ class WindClassifier:
         self.model_physical = None
         self.model_scene = None
 
-        type_path = os.path.join(model_dir, 'fasttext_v2_type.bin')
-        physical_path = os.path.join(model_dir, 'fasttext_v2_physical.bin')
-        scene_path = os.path.join(model_dir, 'fasttext_v2_scene.bin')
+        type_path = os.path.join(model_dir, 'fasttext_v6_type.bin')
+        physical_path = os.path.join(model_dir, 'fasttext_v6_physical.bin')
+        scene_path = os.path.join(model_dir, 'fasttext_v6_scene.bin')
 
         if os.path.exists(type_path):
             self.model_type = fasttext.load_model(type_path)
@@ -157,7 +174,7 @@ class WindClassifier:
 
         # ---- type ----
         major = _major_component_match(name)
-        type_rule = ('大部件' if major == '大部件' else None) or self._rule_match(name, TYPE_RULES)
+        type_rule = ('大部件' if major == '大部件' else None) or self._rule_match(_canon(name), TYPE_RULES)
         if type_rule:
             result['type'] = type_rule
             methods['type'] = 'rule'
@@ -170,17 +187,23 @@ class WindClassifier:
                 alt = max(((l, p) for l, p in zip(labels, probs)
                            if l != '__label__大部件'), key=lambda x: x[1])
                 label = alt[0].replace('__label__', '')
-            result['type'] = label
-            methods['type'] = 'model'
+                result['type'] = label
+                methods['type'] = 'model'
+                result.setdefault('prob', {})['type'] = alt[1]
+            else:
+                result['type'] = label
+                methods['type'] = 'model'
+                result.setdefault('prob', {})['type'] = pred[1][0]
         else:
             result['type'] = '备件'
             methods['type'] = 'default'
+            result.setdefault('prob', {})['type'] = 0.0
 
         # ---- physical ----
         if _is_oil_product(name):
             physical_rule = '油品'
         else:
-            physical_rule = self._rule_match(name, PHYSICAL_RULES)
+            physical_rule = self._rule_match(_canon(name), PHYSICAL_RULES)
         if physical_rule:
             result['physical'] = physical_rule
             methods['physical'] = 'rule'
@@ -188,12 +211,14 @@ class WindClassifier:
             pred = self.model_physical.predict(name)
             result['physical'] = pred[0][0].replace('__label__', '')
             methods['physical'] = 'model'
+            result.setdefault('prob', {})['physical'] = pred[1][0]
         else:
             result['physical'] = '其他'
             methods['physical'] = 'default'
+            result.setdefault('prob', {})['physical'] = 0.0
 
         # ---- scene ----
-        scene_rule = self._rule_match(name, SCENE_RULES)
+        scene_rule = self._rule_match(_canon(name), SCENE_RULES)
         if scene_rule:
             result['scene'] = scene_rule
             methods['scene'] = 'rule'
@@ -201,10 +226,25 @@ class WindClassifier:
             pred = self.model_scene.predict(name)
             result['scene'] = pred[0][0].replace('__label__', '')
             methods['scene'] = 'model'
+            result.setdefault('prob', {})['scene'] = pred[1][0]
         else:
             result['scene'] = '通用类'
             methods['scene'] = 'default'
+            result.setdefault('prob', {})['scene'] = 0.0
 
+        # ---- 置信度分层(val校准): auto≥0.9 / low 0.7~0.9 / review<0.7 ----
+        # rule/default 判定: rule 置信等同 auto; default(名称过短)进 review
+        tiers = {}
+        for d in ('type', 'physical', 'scene'):
+            if methods[d] == 'rule':
+                p = 1.0
+            elif methods[d] == 'default':
+                p = 0.0
+            else:
+                p = result.get('prob', {}).get(d, 0.0)
+            result.setdefault('prob', {})[d] = p
+            tiers[d] = 'auto' if p >= 0.9 else ('review' if p < 0.7 else 'low')
+        result['tier'] = tiers
         result['method'] = methods
         return result
 
