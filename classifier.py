@@ -45,7 +45,7 @@ TYPE_RULES = [
 BEARING_TERMS = re.compile(r"变桨轴承|偏航轴承|回转轴承|大齿圈")
 BEARING_ACCESSORY = re.compile(
     r"润滑|加脂|油脂|密封|传感|编码|变送|监测|监视|视频|注油|废油|费油|油嘴|分配|"
-    r"收集|集油|袋|垫片|垫圈|螺杆|螺栓|螺柱|螺母|螺钉|裂纹|孔|模块|吊")
+    r"收集|集油|袋|垫片|垫圈|螺杆|螺栓|螺柱|螺母|螺钉|裂纹|螺栓孔|孔裂|模块|吊")
 QUALIFIER_RE = re.compile(r"不含\S*|含\S*")
 MAJOR_TERMS = re.compile(
     r"机舱罩壳|机舱前盖板|主轴总成|主轴轴承|主轴承|主轴组件|主轴轴系|风轮叶片|"
@@ -96,6 +96,7 @@ def _major_component_match(name):
 # 仅保留与模型打平且确定性高的「传感器」组;油品走专用谓词）
 PHYSICAL_RULES = [
     (["传感器", "接近开关", "压力开关"], "传感器"),
+    (["碳刷", "电刷"], "电气件"),  # 业务裁定2026-10-20: 碳刷/电刷及其配件属电气件
 ]
 
 # 油品判定：以"油"结尾（齿轮油/液压油/润滑油/变压器油等成品油）或含成品油脂词
@@ -219,6 +220,8 @@ class WindClassifier:
 
         # ---- scene ----
         scene_rule = self._rule_match(_canon(name), SCENE_RULES)
+        if not scene_rule and _is_oil_product(name) and re.search(r'主轴|主轴承', name):
+            scene_rule = '润滑系统类'  # 业务裁定2026-10-20: 主轴润滑油脂属润滑系统(如主轴轴承润滑油)
         if scene_rule:
             result['scene'] = scene_rule
             methods['scene'] = 'rule'
