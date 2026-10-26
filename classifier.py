@@ -53,9 +53,13 @@ BEARING_ACCESSORY = re.compile(
     r"润滑|加脂|油脂|密封|传感|编码|变送|监测|监视|视频|注油|废油|费油|油嘴|分配|"
     r"收集|集油|袋|垫片|垫圈|螺杆|螺栓|螺柱|螺母|螺钉|裂纹|螺栓孔|孔裂|模块|吊")
 QUALIFIER_RE = re.compile(r"不含\S*|含\S*")
+# 本体材质词: 叶片等整机本体才标材质(玻璃钢/FRP等), 纯配件不标
+MATERIAL_RE = re.compile(r"玻璃钢|碳纤维|复合材料|GFRP|\bFRP\b", re.IGNORECASE)
+# 紧固件(随件说明): 本体+材质+随件螺栓 => 仍是本体; 纯"叶片螺栓" => 配件
+FASTENER_RE = re.compile(r"螺栓|螺柱|螺母|螺钉|垫片|垫圈|紧固件")
 CONFIG_DESC_RE = re.compile(r"(?:[配带]\s*|[\s、,]+)\S*润滑系统")
 # 业务确认的整机特例(绕过配件降级词): 叶片本体带螺栓/材质描述, 如"风轮叶片 螺栓 玻璃钢"
-FORCE_MAJOR_RE = re.compile(r"风轮叶片[\s、,]*螺栓|风轮叶片[\s、,]*(?:玻璃钢|FRP|碳纤维)")
+
 MAJOR_TERMS = re.compile(
     r"机舱罩壳|机舱前盖板|主轴总成|主轴轴承|主轴承|主轴组件|主轴轴系|风轮叶片|"
     r"变桨轴承|偏航轴承|回转轴承|大齿圈|叶片|桨叶|发电机|齿轮箱|主轴|塔筒|机舱罩|"
@@ -88,8 +92,6 @@ def _major_component_match(name):
     能级实现: 回转轴承类本体优先;其他整机词命中后,把整机词从名称中剥离,
     若剩余部分含配件词则降级——降级时模型仍可判备件/耗材/工器具,但不得判大部件。
     """
-    if FORCE_MAJOR_RE.search(name):
-        return '大部件'  # 业务确认特例
     if BEARING_TERMS.search(name):
         if not BEARING_ACCESSORY.search(name):
             return '大部件'  # 回转轴承类本体(螺栓套件等配件除外)
@@ -104,6 +106,10 @@ def _major_component_match(name):
         if re.search(r'发电机', name):
             residue = residue.replace('电机', ' ')
         if not MAJOR_ACCESSORY.search(residue):
+            return '大部件'
+        # 规律: 名称含本体材质词时, 若剩余降级词只有紧固件, 说明是"本体+随件"
+        # (如"风轮叶片 螺栓 玻璃钢"), 仍判本体; 含盖板/支架/吊具等其他配件词则照常降级
+        if MATERIAL_RE.search(name) and not MAJOR_ACCESSORY.search(FASTENER_RE.sub(' ', residue)):
             return '大部件'
         return 'demoted'
     return None
