@@ -53,10 +53,11 @@ BEARING_ACCESSORY = re.compile(
     r"润滑|加脂|油脂|密封|传感|编码|变送|监测|监视|视频|注油|废油|费油|油嘴|分配|"
     r"收集|集油|袋|垫片|垫圈|螺杆|螺栓|螺柱|螺母|螺钉|裂纹|螺栓孔|孔裂|模块|吊")
 QUALIFIER_RE = re.compile(r"不含\S*|含\S*")
+CONFIG_DESC_RE = re.compile(r"(?:[配带]\s*|[\s、,]+)\S*润滑系统")
 MAJOR_TERMS = re.compile(
     r"机舱罩壳|机舱前盖板|主轴总成|主轴轴承|主轴承|主轴组件|主轴轴系|风轮叶片|"
     r"变桨轴承|偏航轴承|回转轴承|大齿圈|叶片|桨叶|发电机|齿轮箱|主轴|塔筒|机舱罩|"
-    r"机舱|导流罩|轮毂|主机架|副机架|变流器整机|双馈变流器|全功率变流器|风冷一体机|整机|主机|塔架")
+    r"机舱|导流罩|轮毂|主机架|副机架|变流器整机|双馈变流器|全功率变流器|风冷一体机|整机|主机|塔架|机组|变流器|变压器")
 # 配件降级词: 在「剥掉整机词后的剩余部分」里匹配(避免"发电机"被"电机"子串误伤)
 # 注意: "润滑"单独出现常是规格限定词(如"高原配 润滑 速比"),仅部件形态(润滑泵/系统等)降级
 MAJOR_ACCESSORY = re.compile(
@@ -90,9 +91,14 @@ def _major_component_match(name):
             return '大部件'  # 回转轴承类本体(螺栓套件等配件除外)
         return 'demoted'
     if MAJOR_TERMS.search(name):
-        # 先剥"含X/不含X"限定词(再做整机词剥离,避免"含叶片监测"被拆断漏出裸词)
-        residue = QUALIFIER_RE.sub(' ', name)
-        residue = MAJOR_TERMS.sub(' ', residue)
+        # 原名称上先剥掉"含X/不含X"限定词与"空格分隔的润滑系统"配置说明
+        # ("齿轮箱 配 润滑系统"=整机配置; "齿轮箱润滑系统"紧邻=系统总成,仍是配件)
+        base = QUALIFIER_RE.sub(' ', name)
+        base = CONFIG_DESC_RE.sub(' ', base)
+        residue = MAJOR_TERMS.sub(' ', base)
+        # "发电机"后的厂商名(如"湘潭电机")不算配件词
+        if re.search(r'发电机', name):
+            residue = residue.replace('电机', ' ')
         if not MAJOR_ACCESSORY.search(residue):
             return '大部件'
         return 'demoted'
