@@ -8,11 +8,43 @@
 v2.1: 配套子词 fastText 模型(fasttext_v6_*,minn/maxn=2/4)
 - 规则库按「规则 vs 模型在各自触发集上的准确率」裁剪,只保留规则不劣于模型的高置信组
 - 油品判定用专用谓词: 以"油"结尾 或 含润滑脂/黄油等成品油词
+
+v2.2 (业务裁定2026-10-30):
+- 变桨/偏航齿轮箱=减速机, 属备件
+- 变压器: 裸主变仍判大部件, 配件(温控/端子/防雷/绕组)与辅变(辅助/干式/直流/低压副边/带位号)降级
+- 上下文限定词不触发整机词: 配套/适用说明、尺寸数量规格词("叶片数量13")、"N主机"端口数
+- 漆类归耗材、紧固件归备件(TYPE_RULES 补词)
+
+v2.3 (业务裁定2026-10-30):
+- 油品谓词收紧: 以"油/油脂"结尾 + 润滑脂/锂基脂; "黄油枪/集废油瓶"不再误判油品
+- 油品类型一律耗材(与油品谓词联动, 修模型偶发判备件)
+- 独立显示器(行首词)归工器具; 装机内触摸屏/HMI 仍走模型判备件
+- 热缩管: 耗材 + 物理统一"其他"
 """
 
 import fasttext
+import numpy as np
 import os
 import re
+
+# numpy>=2 兼容: 旧版 fasttext 的 predict 用 np.array(probs, copy=False),
+# numpy2 下 copy=False 语义变化会抛 ValueError, 这里用同逻辑垫掉
+if int(np.__version__.split('.')[0]) >= 2:
+    def _np2_predict(self, text, k=1, threshold=0.0, on_unicode_error="strict"):
+        def check(entry):
+            if entry.find("\n") != -1:
+                raise ValueError("predict processes one line at a time (remove '\\n')")
+            entry += "\n"
+            return entry
+        if isinstance(text, list):
+            return self.f.multilinePredict([check(e) for e in text], k, threshold, on_unicode_error)
+        predictions = self.f.predict(check(text), k, threshold, on_unicode_error)
+        if predictions:
+            probs, labels = zip(*predictions)
+        else:
+            probs, labels = ([], ())
+        return labels, np.array(probs)
+    fasttext.FastText._FastText.predict = _np2_predict
 
 # ============ 规则库 ============
 
@@ -31,14 +63,21 @@ SCENE_RULES = [
 TYPE_RULES = [
     # 耗材 - 明确消耗品
     (["滤棉", "滤网", "O型圈", "油封", "扎带", "擦机布", "擦拭纸", "防火泥",
-      "密封垫圈", "橡胶垫圈", "密封垫片", "橡胶垫片", "石棉垫"], "耗材"),
+      "密封垫圈", "橡胶垫圈", "密封垫片", "橡胶垫片", "石棉垫",
+      # 漆类/涂料(业务裁定2026-10-30: "叶片面漆/齿轮箱蓝自喷漆"等含整机词的漆仍是耗材)
+      "喷漆", "面漆", "底漆", "绝缘漆", "防锈漆", "银粉漆", "锤纹漆", "涂料", "稀释剂",
+      # 热缩管(业务裁定2026-10-30): 按米/卷领用的绝缘材料, 归耗材
+      "热缩管"], "耗材"),
     # 工器具 - 明确工具
     (["扳手", "螺丝刀", "万用表", "电钻", "角磨机", "钳子", "吊带", "千斤顶", "手锤", "撬棍", "测试仪", "示波器", "兆欧表", "液压扳手", "扭力扳手", "吊环",
-      "快扳", "棘轮扳", "羊毛刷", "套筒", "望远镜", "对讲机", "锯条", "钻头", "丝攻", "钢丝钳", "尖嘴钳", "斜口钳", "老虎钳", "克丝钳", "鎯头", "榔头", "电烙铁", "拉伸器", "踏板", "磨光机", "曲线锯", "水泵钳"], "工器具"),
+      "快扳", "棘轮扳", "羊毛刷", "套筒", "望远镜", "对讲机", "锯条", "钻头", "丝攻", "钢丝钳", "尖嘴钳", "斜口钳", "老虎钳", "克丝钳", "鎯头", "榔头", "电烙铁", "拉伸器", "踏板", "磨光机", "曲线锯", "水泵钳"], "工器具",
+     # 业务裁定2026-10-30: 独立显示器(监控工作站外设)归工器具; "压力显示器/7段码显示器"等
+     # 组件形态的仍走模型判备件, 故仅匹配行首独立词
+     [re.compile(r'^显示器(?:\s|$)')]),
     # 工器具 - 量具(业务裁定2026-10-20: 塞尺等测量工具归工器具)
     (["塞尺", "卡尺", "千分尺", "百分表", "深度尺", "水平尺", "直尺", "角尺", "卷尺", "量块", "靠尺"], "工器具"),
     # 备件 - 紧固件(业务裁定2026-10-20: 螺栓/螺母/垫圈归备件)
-    (["螺栓", "螺柱", "螺母", "垫圈", "垫片"], "备件"),
+    (["螺栓", "螺柱", "螺母", "垫圈", "垫片", "紧固件"], "备件"),
     # 大部件规则已移除——含"塔筒""发电机""齿轮箱"的物料 90%+是备件/耗材
     # 大部件分类完全交给 fastText 模型处理
 ]
@@ -58,12 +97,25 @@ MATERIAL_RE = re.compile(r"玻璃钢|碳纤维|复合材料|GFRP|\bFRP\b", re.IG
 # 紧固件(随件说明): 本体+材质+随件螺栓 => 仍是本体; 纯"叶片螺栓" => 配件
 FASTENER_RE = re.compile(r"螺栓|螺柱|螺母|螺钉|垫片|垫圈|紧固件")
 CONFIG_DESC_RE = re.compile(r"(?:[配带]\s*|[\s、,]+)\S*润滑系统")
+# 业务裁定(2026-10-30): 变桨/偏航齿轮箱=减速机, 属备件, 不算大部件
+GEARBOX_DRIVE_RE = re.compile(r"[变偏][航桨]\s*齿轮箱")
+# 变压器(业务裁定2026-10-30): 裸主变仍判大部件(761b2c5高价值口径);
+# 温控器/端子排/防雷/绕组等是配件, 辅助/干式/直流/机舱辅变属备件,
+# "变压器3G2"式带位号、低压副边(<1kV, 如690V-24V/690/400V)也是辅变
+TRANSFORMER_ACCESSORY = re.compile(
+    r"温控|端子|防雷|绕组|副边|辅助|干式|直流|隔离|自耦|互感|充电|机舱|"
+    r"变压器[0-9A-Za-z]|[-/]\s*\d{1,3}\s*V(?![0-9kK])")
+# 上下文限定词(2026-10-30): 尺寸/数量描述词连同其名词前缀、"配套/适用/用于"适用说明、
+# "N主机"端口/数量规格中的整机词不算本体(如"塞尺 叶片数量13"、"紧固件 配套GE机组")
+DIMENSION_RE = re.compile(r"[\u4e00-\u9fff]{0,3}(?:长度|宽度|高度|厚度|数量|重量|直径|间距)")
+APPLICABILITY_RE = re.compile(r"(?:配套|适用|用于|适应)[^，,；;]*")
+DIGIT_HOST_RE = re.compile(r"\d+\s*主机")
 # 业务确认的整机特例(绕过配件降级词): 叶片本体带螺栓/材质描述, 如"风轮叶片 螺栓 玻璃钢"
 
 MAJOR_TERMS = re.compile(
     r"机舱罩壳|机舱前盖板|主轴总成|主轴轴承|主轴承|主轴组件|主轴轴系|风轮叶片|"
     r"变桨轴承|偏航轴承|回转轴承|大齿圈|叶片|桨叶|发电机|齿轮箱|主轴|塔筒|机舱罩|"
-    r"机舱|导流罩|轮毂|主机架|副机架|变流器整机|双馈变流器|全功率变流器|风冷一体机|整机|主机|塔架|机组|变流器|变压器")
+    r"机舱|导流罩|轮毂|主机架|副机架|变流器整机|双馈变流器|全功率变流器|风冷一体机|整机|主机|塔架|机组|变流器")
 # 配件降级词: 在「剥掉整机词后的剩余部分」里匹配(避免"发电机"被"电机"子串误伤)
 # 注意: "润滑"单独出现常是规格限定词(如"高原配 润滑 速比"),仅部件形态(润滑泵/系统等)降级
 MAJOR_ACCESSORY = re.compile(
@@ -75,8 +127,8 @@ MAJOR_ACCESSORY = re.compile(
     r"低速|半环|半月环|月环|胀紧|涨套|轴套|套筒|转换|定心|联轴|齿条|减速机|减速器|"
     r"减速箱|变压器|液压站|总成|油|脂|胶|锤|钳|闸钳|阀|制动|刹车|集中|系统|开关|装置|控制|"
     r"模块|模件|模组|板|PCBA|继电器|接触器|断路器|短路|面板|UPS|ups|保险|熔断|熔芯|"
-    r"组件|铜|销|导向|栓|记录|卡|表|游标|指示|温度|液位|管道|管路|管|软管|罩|壳|"
-    r"端盖|锻件|透气|帽|天窗|标签|柜|机箱|箱|盒|手操|手柄|挡板|绝缘|防雷器|防雷箱|"
+    r"组件|铜|销|导向|栓|记录|卡|表|游标|指示|温度|温控|端子|液位|漆|摩擦|采集|管道|管路|管|软管|罩|壳|"
+    r"端盖|锻件|透气|帽|天窗|标签|柜|机箱|箱|盒|手操|手柄|挡板|绝缘|防雷|"
     r"转子防雷|浪涌|主控|整流|加热器|呼吸|干燥|储能|罐|蓄能|分配器|CMS|测速|驱动|"
     r"离心盘|收缩盘|盘|电池|充电|交换机|门锁|锁|减震|地脚|按钮|空开|安装|标识|标志|"
     r"扶手|拉手|滑轨|雨眉|顶盖|盖|梯|除湿|雷达|插头|拉伸|胀套|警告|测风|存储|"
@@ -96,11 +148,24 @@ def _major_component_match(name):
         if not BEARING_ACCESSORY.search(name):
             return '大部件'  # 回转轴承类本体(螺栓套件等配件除外)
         return 'demoted'
+    if GEARBOX_DRIVE_RE.search(name):
+        return 'demoted'  # 变桨/偏航齿轮箱=减速机(备件), 模型不得判大部件
+    if '变压器' in name:
+        if TRANSFORMER_ACCESSORY.search(name):
+            return 'demoted'
+        if MAJOR_ACCESSORY.search(re.sub('变压器', ' ', name)):
+            return 'demoted'  # "变压器 供电电缆"类: 通用配件词仍降级
+        return '大部件'
     if MAJOR_TERMS.search(name):
         # 原名称上先剥掉"含X/不含X"限定词与"空格分隔的润滑系统"配置说明
         # ("齿轮箱 配 润滑系统"=整机配置; "齿轮箱润滑系统"紧邻=系统总成,仍是配件)
-        base = QUALIFIER_RE.sub(' ', name)
+        base = DIGIT_HOST_RE.sub(' ', name)
+        base = DIMENSION_RE.sub(' ', base)
+        base = APPLICABILITY_RE.sub(' ', base)
+        base = QUALIFIER_RE.sub(' ', base)
         base = CONFIG_DESC_RE.sub(' ', base)
+        if not MAJOR_TERMS.search(base):
+            return None  # 整机词只出现在规格/适用说明里(塞尺"叶片数量13"类), 交模型
         residue = MAJOR_TERMS.sub(' ', base)
         # "发电机"后的厂商名(如"湘潭电机")不算配件词
         if re.search(r'发电机', name):
@@ -119,6 +184,8 @@ def _major_component_match(name):
 PHYSICAL_RULES = [
     (["传感器", "接近开关", "压力开关"], "传感器"),
     (["碳刷", "电刷"], "电气件"),  # 业务裁定2026-10-20: 碳刷/电刷及其配件属电气件
+    # 热缩管(业务裁定2026-10-30): 无源绝缘材料统一"其他", 避免模型在电子件/电气件间摇摆
+    (["热缩管"], "其他"),
 ]
 
 # ============ 油品牌号 → scene (牌号用途经 websearch 确认, 2026-10-20) ============
@@ -150,9 +217,11 @@ def _oil_brand_scene(name):
     return None
 
 
-# 油品判定：以"油"结尾（齿轮油/液压油/润滑油/变压器油等成品油）或含成品油脂词
+# 油品判定：以"油/油脂"结尾（齿轮油/液压油/润滑油脂/变压器油等成品油）或含成品脂词
 # v2: 裸"油"子串误伤653条非油品物料（油管/油泵/注油接头等），已废弃
-OIL_PRODUCTS = ["润滑脂", "黄油", "锂基脂", "废油"]
+# v2.3: "黄油/废油"子串误伤"黄油枪/集废油瓶"(真品以油结尾仍覆盖); "油脂"仅认结尾
+#       ("发电机油脂泵/加油脂转换头"等器件不含尾缀)
+OIL_PRODUCTS = ["润滑脂", "锂基脂"]
 
 # ============ 同义词归一(全局预处理, 业务确认口径) ============
 # 仅作用于规则层匹配(scene/physical/type规则); 模型输入保持原始名称,
@@ -173,7 +242,11 @@ def _canon(name):
 
 
 def _is_oil_product(name):
-    return name.rstrip().endswith("油") or any(kw in name for kw in OIL_PRODUCTS)
+    # 整串或首词(物料名称, 规格型号拼接前)以油/油脂结尾; 润滑脂/锂基脂按全名包含
+    parts = name.split(None, 1)
+    head = parts[0] if parts else ''
+    return (name.rstrip().endswith(("油", "油脂")) or head.endswith(("油", "油脂"))
+            or any(kw in name for kw in OIL_PRODUCTS))
 
 
 class WindClassifier:
@@ -226,7 +299,12 @@ class WindClassifier:
 
         # ---- type ----
         major = _major_component_match(name)
-        type_rule = ('大部件' if major == '大部件' else None) or self._rule_match(_canon(name), TYPE_RULES)
+        if major == '大部件':
+            type_rule = '大部件'
+        elif _is_oil_product(name):
+            type_rule = '耗材'  # 油脂均为定检消耗品, 与 physical 油品谓词联动
+        else:
+            type_rule = self._rule_match(_canon(name), TYPE_RULES)
         if type_rule:
             result['type'] = type_rule
             methods['type'] = 'rule'
